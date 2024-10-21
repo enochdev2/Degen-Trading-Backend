@@ -7,10 +7,14 @@ import {
   getOrCreateAssociatedTokenAccount,
   mintTo,
 } from "@solana/spl-token";
+import * as splToken from "@solana/spl-token";
+
 // import { createTokenIfNotExists } from "../utils/index";
 
 
 const connection = Connection;
+const programWallet = Keypair.generate(); // You can also load it from a secret key file or environment variable
+
 
 
 export const swapsolana = async (req, res) => {
@@ -48,7 +52,7 @@ export const swapsolana = async (req, res) => {
 
     // Transfer tokens from the program's account to the user's account
     const transferInstruction = splToken.Token.createTransferInstruction(
-      splToken.TOKEN_PROGRAM_ID,
+      TOKEN_PROGRAM_ID,
       programTokenAccount.address, // Program's token account
       userTokenAccount.address, // User's token account
       programWallet.publicKey, // Program's wallet as the owner
@@ -126,7 +130,7 @@ export const swapothers = async (req, res) => {
 
     // Transfer the target tokens (e.g., USDC) from the user to the program wallet
     const transferInstruction = splToken.Token.createTransferInstruction(
-      splToken.TOKEN_PROGRAM_ID,
+      TOKEN_PROGRAM_ID,
       targetTokenAccount.address, // User's target token account (e.g., USDC)
       programWallet.publicKey, // Program wallet to receive target tokens
       userWallet, // User's wallet
@@ -143,7 +147,7 @@ export const swapothers = async (req, res) => {
       );
 
     const mintToInstruction = splToken.Token.createMintToInstruction(
-      splToken.TOKEN_PROGRAM_ID,
+      TOKEN_PROGRAM_ID,
       devSolMint, // Mint address of DeVSol
       userDevSolTokenAccount.address, // User's DeVSol token account
       programWallet.publicKey, // Program wallet (as mint authority)
