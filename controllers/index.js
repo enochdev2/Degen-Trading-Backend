@@ -1,6 +1,6 @@
-import { LAMPORTS_PER_SOL } from "@solana/web3.js";
+import { LAMPORTS_PER_SOL, sendAndConfirmTransaction } from "@solana/web3.js";
 
-import { Connection, PublicKey, clusterApiUrl, Keypair } from "@solana/web3.js";
+import { Connection, PublicKey, clusterApiUrl,Transaction, SystemProgram, Keypair } from "@solana/web3.js";
 import {
   TOKEN_PROGRAM_ID,
   createMint,
@@ -11,8 +11,8 @@ import * as splToken from "@solana/spl-token";
 import { connectDB } from "../lib/db.js";
 
 // import { createTokenIfNotExists } from "../utils/index";
-
-const connection = Connection;
+// Define the network cluster (use devnet for your testing purposes)
+const connection = new Connection(clusterApiUrl('devnet'), 'confirmed'); // 'confirmed' ensures transactions are confirmed
 const programWallet = Keypair.generate(); // You can also load it from a secret key file or environment variable
 
 export const swapsolana = async (req, res) => {
@@ -59,10 +59,10 @@ export const swapsolana = async (req, res) => {
     );
 
     // Add the transfer instruction to a transaction
-    const transaction = new web3.Transaction().add(transferInstruction);
+    const transaction = new Transaction().add(transferInstruction);
 
     // Create a transfer SOL transaction from the user to the program wallet (optional)
-    const solTransferInstruction = web3.SystemProgram.transfer({
+    const solTransferInstruction = SystemProgram.transfer({
       fromPubkey: userWallet,
       toPubkey: programWallet.publicKey,
       lamports: solAmount * LAMPORTS_PER_SOL,
@@ -98,7 +98,7 @@ export const swapothers = async (req, res) => {
   } = req.body;
 
   try {
-    const userWallet = new web3.PublicKey(userPublicKey);
+    const userWallet = new PublicKey(userPublicKey);
 
     // Get the conversion rate from the price feed (e.g., USDC -> DeVSol)
     const tokenPair = `${targetTokenMint}/DeVSol`;
@@ -155,13 +155,13 @@ export const swapothers = async (req, res) => {
     );
 
     // Add both instructions (transfer and mint) to a transaction
-    const transaction = new web3.Transaction().add(
+    const transaction = new Transaction().add(
       transferInstruction,
       mintToInstruction
     );
 
     // Send the transaction
-    const signature = await web3.sendAndConfirmTransaction(
+    const signature = await sendAndConfirmTransaction(
       connection,
       transaction,
       [programWallet]
