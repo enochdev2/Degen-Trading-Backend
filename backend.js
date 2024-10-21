@@ -7,6 +7,12 @@ import useUserSOLBalanceStore from '../stores/useUserSOLBalanceStore';
 import { Connection, PublicKey, clusterApiUrl, Keypair } from "@solana/web3.js";
 import { TOKEN_PROGRAM_ID, createMint, getOrCreateAssociatedTokenAccount, mintTo } from "@solana/spl-token";
 
+// MongoDB setup
+const { MongoClient } = require('mongodb');
+const mongoUri = "mongodb://localhost:27017"; // Use your actual MongoDB URI
+const client = new MongoClient(mongoUri);
+let tokensCollection;
+
     const { connection } = useConnection();
     const { publicKey } = useWallet();
     const { getUserSOLBalance } = useUserSOLBalanceStore();
@@ -22,7 +28,7 @@ const onClick = useCallback(async () => {
         return;
     }
 
-    let signature: TransactionSignature = '';
+    let signature = '';
 
     try {
         signature = await connection.requestAirdrop(publicKey, LAMPORTS_PER_SOL);
@@ -47,13 +53,28 @@ const onClick = useCallback(async () => {
 ////________________________________________________________________________________________________________________
 
 
+async function connectToDatabase() {
+    try {
+        await client.connect();
+        const database = client.db('solana_dex');
+        tokensCollection = database.collection('tokens');
+        console.log('Connected to MongoDB');
+    } catch (err) {
+        console.error('Database connection error:', err);
+    }
+}
+
+connectToDatabase();
+
+
+
 
 // SOLANA_NETWORK can be 'devnet', 'testnet', or 'mainnet-beta'
 const SOLANA_NETWORK = 'devnet';
 
 
   // Function to mint token
-  const mintToken = async (walletAddress) => {
+const mintToken = async (walletAddress) => {
 
     try {
       const connection = new Connection(clusterApiUrl(SOLANA_NETWORK), 'confirmed');
@@ -98,7 +119,7 @@ const SOLANA_NETWORK = 'devnet';
       console.error("Error minting token: ", error);
     } finally {
     }
-  };
+};
 
 
 
@@ -121,7 +142,9 @@ const SOLANA_NETWORK = 'devnet';
 
 
 
-
+///////////////////////////////////////////////////////////////////////////////////////////
+//?                         MAIN FUNCTIONS FOR THE BACKEND
+/////////////////////////////////////////////////////////////////////////////////////////////
 
 
 
@@ -131,7 +154,17 @@ let mintedTokens = []; // Or use a map { [tokenName]: mintAddress } for more str
 //! Function to create token if it doesn't exist in the array
 async function createTokenIfNotExists(tokenName, mintAuthority) {
     // Check if the token has already been minted
-    const existingToken = mintedTokens.find(token => token.name === tokenName);
+    // const existingToken = mintedTokens.find(token => token.name === tokenName);
+
+
+     // Check if the token exists in the database
+     const existingToken = await tokensCollection.findOne({ tokenName });
+
+     if (existingToken) {
+        console.log(`${tokenName} already exists with mint address: ${existingToken.mintAddress}`);
+        return new web3.PublicKey(existingToken.mintAddress);
+    }
+
     
     if (existingToken) {
         console.log(`${tokenName} already exists with mint address: ${existingToken.mintAddress}`);
@@ -152,6 +185,13 @@ async function createTokenIfNotExists(tokenName, mintAuthority) {
     mintedTokens.push({
         name: tokenName,
         mintAddress: tokenMint.publicKey.toBase58()
+    });
+
+     // Store the token name and mint address in the database
+     await tokensCollection.insertOne({
+        tokenName: tokenName,
+        mintAddress: tokenMint.publicKey.toBase58(),
+        createdAt: new Date()  // Optional: You can store the date the token was created
     });
 
     console.log(`Minted new token ${tokenName} with mint address: ${tokenMint.publicKey.toBase58()}`);
@@ -177,11 +217,13 @@ async function createTokenIfNotExists(tokenName, mintAuthority) {
 }
 
 
-app.post('/swap', async (req, res) => {
+app.post('/swapsolana', async (req, res) => {
     const { userPublicKey, solAmount, targetTokenMint, priceFeed } = req.body;
 
     try {
         const userWallet = new web3.PublicKey(userPublicKey);
+
+
 
         // Fetch price feed for the pair
         const tokenPair = `SOL/${targetTokenMint}`;
@@ -241,32 +283,96 @@ app.post('/swap', async (req, res) => {
     }
 });
 
+app.post('/swapothers', async (req, res) => {
+    const { userPublicKey,targetTokenAmount , targetTokenMint,devSolMint, priceFeed } = req.body
+    
+    try {
+        const userWallet = new web3.PublicKey(userPublicKey);
+    
+        // Get the conversion rate from the price feed (e.g., USDC -> DeVSol)
+        const tokenPair = `${targetTokenMint}/DeVSol`;
+        const conversionRate = priceFeed[tokenPair];  // e.g., 1 USDC = 0.04 DeVSol (example rate)
+    
+        if (!conversionRate) {
+            throw new Error(`Conversion rate for ${tokenPair} not found.`);
+        }
+    
+        // Calculate the amount of DeVSol the user will receive
+        const devSolAmount = targetTokenAmount * conversionRate;
+    
+        // Ensure the user has an associated token account for the target token (e.g., USDC)
+        const targetTokenAccount = await splToken.Token.getOrCreateAssociatedAccountInfo(
+            connection,
+            targetTokenMint,
+            userWallet
+        );
+    
+        // Ensure the program has an associated token account for DeVSol
+        const devSolTokenAccount = await splToken.Token.getOrCreateAssociatedAccountInfo(
+            connection,
+            devSolMint,
+            programWallet.publicKey
+        );
+    
+        // Transfer the target tokens (e.g., USDC) from the user to the program wallet
+        const transferInstruction = splToken.Token.createTransferInstruction(
+            splToken.TOKEN_PROGRAM_ID,
+            targetTokenAccount.address,      // User's target token account (e.g., USDC)
+            programWallet.publicKey,         // Program wallet to receive target tokens
+            userWallet,                      // User's wallet
+            [],                              // No multisig signers
+            targetTokenAmount * 1e6          // Amount to transfer (assuming 6 decimals for USDC)
+        );
+    
+        // Mint DeVSol to the user’s associated token account
+        const userDevSolTokenAccount = await splToken.Token.getOrCreateAssociatedAccountInfo(
+            connection,
+            devSolMint,
+            userWallet
+        );
+    
+        const mintToInstruction = splToken.Token.createMintToInstruction(
+            splToken.TOKEN_PROGRAM_ID,
+            devSolMint,                      // Mint address of DeVSol
+            userDevSolTokenAccount.address,   // User's DeVSol token account
+            programWallet.publicKey,          // Program wallet (as mint authority)
+            [],                               // No multisig signers
+            devSolAmount * 1e9                // Amount of DeVSol to mint (assuming 9 decimals)
+        );
+    
+        // Add both instructions (transfer and mint) to a transaction
+        const transaction = new web3.Transaction().add(transferInstruction, mintToInstruction);
+    
+        // Send the transaction
+        const signature = await web3.sendAndConfirmTransaction(connection, transaction, [programWallet]);
+    
+        console.log(`Converted ${targetTokenAmount} ${targetTokenMint} to ${devSolAmount} DeVSol.`);
+        
 
+          // Prepare return data
+          const result = {
+            success: true,
+            transactionSignature: signature,
+            targetTokenAmount,
+            devSolAmount,
+            message: `Successfully converted ${targetTokenAmount} tokens to ${devSolAmount} DeVSol.`,
+            timestamp: new Date(),
 
+            
+        };
 
-
-
-let mintedTokensMap = {};  // Key-value store for token name and mint address
-
-async function createTokenIfNotExists(tokenName, mintAuthority) {
-    if (mintedTokensMap[tokenName]) {
-        console.log(`${tokenName} already exists with mint address: ${mintedTokensMap[tokenName]}`);
-        return mintedTokensMap[tokenName];
+        res.json(result);
+    
+    } catch (err) {
+        console.error('Conversion failed:', err);
+        throw err;
     }
+});
 
-    const tokenMint = await splToken.Token.createMint(
-        connection,
-        programWallet,
-        mintAuthority.publicKey,
-        null,
-        9,
-        splToken.TOKEN_PROGRAM_ID
-    );
 
-    mintedTokensMap[tokenName] = tokenMint.publicKey.toBase58();
-    console.log(`Minted new token ${tokenName} with mint address: ${tokenMint.publicKey.toBase58()}`);
-    return tokenMint.publicKey.toBase58();
-}
+
+
+
 
 
 
@@ -281,33 +387,3 @@ const Token = mongoose.model('Token', tokenSchema);
 
 // Example: Connect to MongoDB
 mongoose.connect('mongodb://localhost:27017/solana-dex', { useNewUrlParser: true, useUnifiedTopology: true });
-
-
-
-async function createTokenIfNotExists(tokenName, mintAuthority) {
-    const existingToken = await Token.findOne({ name: tokenName });
-    
-    if (existingToken) {
-        console.log(`${tokenName} already exists with mint address: ${existingToken.mintAddress}`);
-        return existingToken.mintAddress;
-    }
-
-    const tokenMint = await splToken.Token.createMint(
-        connection,
-        programWallet,
-        mintAuthority.publicKey,
-        null,
-        9,
-        splToken.TOKEN_PROGRAM_ID
-    );
-
-    // Save the new token to the database
-    const newToken = new Token({
-        name: tokenName,
-        mintAddress: tokenMint.publicKey.toBase58()
-    });
-
-    await newToken.save();
-    console.log(`Minted new token ${tokenName} with mint address: ${tokenMint.publicKey.toBase58()}`);
-    return tokenMint.publicKey.toBase58();
-}
