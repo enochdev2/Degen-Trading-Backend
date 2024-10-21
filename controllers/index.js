@@ -8,14 +8,12 @@ import {
   mintTo,
 } from "@solana/spl-token";
 import * as splToken from "@solana/spl-token";
+import { connectDB } from "../lib/db.js";
 
 // import { createTokenIfNotExists } from "../utils/index";
 
-
 const connection = Connection;
 const programWallet = Keypair.generate(); // You can also load it from a secret key file or environment variable
-
-
 
 export const swapsolana = async (req, res) => {
   const { userPublicKey, solAmount, targetTokenMint, priceFeed } = req.body;
@@ -79,10 +77,11 @@ export const swapsolana = async (req, res) => {
 
     // Return the transaction to the frontend for the user to sign
     res.json({
-      transaction: transactionBase64,
-      tokenMintAddress: tokenMint.publicKey.toBase58(), // Return the token mint address
-      targetTokenAmount: targetTokenAmount, // Return the target token amount to be transferred
-    });
+        transaction: transactionBase64,
+        tokenMintAddress: tokenMint.publicKey.toBase58(), // Token mint address
+        targetTokenAmount: targetTokenAmount, // Target token amount calculated
+        message: `Successfully prepared swap for ${solAmount} SOL to ${targetTokenAmount} ${targetTokenMint}`,
+     });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Swap transaction preparation failed" });
@@ -172,83 +171,82 @@ export const swapothers = async (req, res) => {
       `Converted ${targetTokenAmount} ${targetTokenMint} to ${devSolAmount} DeVSol.`
     );
 
-    // Prepare return data
-    const result = {
-      success: true,
-      transactionSignature: signature,
-      targetTokenAmount,
-      devSolAmount,
-      message: `Successfully converted ${targetTokenAmount} tokens to ${devSolAmount} DeVSol.`,
-      timestamp: new Date(),
-    };
-
-    res.json(result);
+    res.json({
+        success: true,
+        transactionSignature: signature,
+        targetTokenAmount: targetTokenAmount, // Amount of original token converted
+        devSolAmount: devSolAmount, // Amount of DeVSol received
+        message: `Successfully converted ${targetTokenAmount} tokens to ${devSolAmount} DeVSol.`,
+        timestamp: new Date(),
+     });
+     
   } catch (err) {
-    console.error("Conversion failed:", err);
+    res.status(500).json({ error: "Swap transaction preparation failed" });
     throw err;
   }
 };
 
 
 
+const createTokenIfNotExists = async (tokenName, mintAuthority, initialSupply) => {
+  // Check if the token has already been minted
+  // const existingToken = mintedTokens.find(token => token.name === tokenName);
 
-const createTokenIfNotExists = async (tokenName, mintAuthority) => {
-    // Check if the token has already been minted
-    // const existingToken = mintedTokens.find(token => token.name === tokenName);
-  
-    // Check if the token exists in the database
-    const existingToken = await Token.findOne({ tokenName });
-  
-    if (existingToken) {
-      console.log(
-        `${tokenName} already exists with mint address: ${existingToken.mintAddress}`
-      );
-      return new PublicKey(existingToken.mintAddress);
-    }
-  
-    // Mint a new token if it doesn't exist
-    const tokenMint = await splToken.Token.createMint(
-      connection,
-      programWallet, // Program wallet or admin wallet
-      mintAuthority.publicKey, // Mint authority
-      null, // Freeze authority
-      9, // Decimals
-      TOKEN_PROGRAM_ID
-    );
-  
-    // Store the token name and mint address in the array
-    mintedTokens.push({
-      name: tokenName,
-      mintAddress: tokenMint.publicKey.toBase58(),
-    });
-  
-    // Store the token name and mint address in the database
-    await Token.insertOne({
-      tokenName: tokenName,
-      mintAddress: tokenMint.publicKey.toBase58(),
-      createdAt: new Date(), // Optional: You can store the date the token was created
-    });
-  
+  connectDB();
+
+  // Check if the token exists in the database
+  const existingToken = await Token.findOne({ tokenName });
+
+  if (existingToken) {
     console.log(
-      `Minted new token ${tokenName} with mint address: ${tokenMint.publicKey.toBase58()}`
+      `${tokenName} already exists with mint address: ${existingToken.mintAddress}`
     );
-  
-    // Get the program's associated token account for this mint
-    const programTokenAccount = await tokenMint.getOrCreateAssociatedAccountInfo(
-      programWallet.publicKey
-    );
-  
-    // Mint the initial supply of tokens to the program's token account
-    await tokenMint.mintTo(
-      programTokenAccount.address, // Program's token account
-      mintAuthority.publicKey, // Mint authority
-      [], // No multisig signers
-      initialSupply * 1e9 // Initial supply (assuming 9 decimals)
-    );
-  
-    console.log(
-      `Minted initial supply of ${initialSupply} ${tokenName} tokens to the program wallet`
-    );
-    return tokenMint;
-    // return tokenMint.publicKey.toBase58();
+    return new PublicKey(existingToken.mintAddress);
   }
+
+  // Mint a new token if it doesn't exist
+  const tokenMint = await splToken.Token.createMint(
+    connection,
+    programWallet, // Program wallet or admin wallet
+    mintAuthority.publicKey, // Mint authority
+    null, // Freeze authority
+    9, // Decimals
+    TOKEN_PROGRAM_ID
+  );
+
+  // Store the token name and mint address in the array
+  mintedTokens.push({
+    name: tokenName,
+    mintAddress: tokenMint.publicKey.toBase58(),
+  });
+
+  // Store the token name and mint address in the database
+  await Token.insertOne({
+    tokenName: tokenName,
+    mintAddress: tokenMint.publicKey.toBase58(),
+    createdAt: new Date(), // Optional: You can store the date the token was created
+  });
+
+  console.log(
+    `Minted new token ${tokenName} with mint address: ${tokenMint.publicKey.toBase58()}`
+  );
+
+  // Get the program's associated token account for this mint
+  const programTokenAccount = await tokenMint.getOrCreateAssociatedAccountInfo(
+    programWallet.publicKey
+  );
+
+  // Mint the initial supply of tokens to the program's token account
+  await tokenMint.mintTo(
+    programTokenAccount.address, // Program's token account
+    mintAuthority.publicKey, // Mint authority
+    [], // No multisig signers
+    initialSupply * 1e9 // Initial supply (assuming 9 decimals)
+  );
+
+  console.log(
+    `Minted initial supply of ${initialSupply} ${tokenName} tokens to the program wallet`
+  );
+  return tokenMint;
+  // return tokenMint.publicKey.toBase58();
+};
