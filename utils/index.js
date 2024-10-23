@@ -6,8 +6,6 @@ const { getUserSOLBalance } = useUserSOLBalanceStore();
 // SOLANA_NETWORK can be 'devnet', 'testnet', or 'mainnet-beta'
 const SOLANA_NETWORK = "devnet";
 
-// Array to store tokens that have been minted
-let mintedTokens = []; // Or use a map { [tokenName]: mintAddress } for more structure
 
 //! Function to create token if it doesn't exist in the array
 export const createTokenIfNotExists = async (tokenName, mintAuthority) => {
