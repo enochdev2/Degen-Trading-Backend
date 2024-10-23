@@ -31,7 +31,7 @@ const adminPrivateKeyBytess = bs58.decode(programWalletPrivateKeyBase58);
 
 if (adminPrivateKeyBytess.length === 64) {
     programWallet = Keypair.fromSecretKey(adminPrivateKeyBytess);
-    console.log('admin Public Key:', programWallet.publicKey.toString());
+    console.log('programWallet Public Key:', programWallet.publicKey.toString());
   } else {
     console.error("Error: Invalid secret key length. Expected 64 bytes.");
   }
